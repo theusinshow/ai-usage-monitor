@@ -17,7 +17,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WebviewWindow, WindowEvent,
+    AppHandle, Emitter, Manager, State, WindowEvent,
 };
 use walkdir::WalkDir;
 
@@ -896,7 +896,7 @@ pub fn run() {
             configure_tray(app.handle())?;
             Ok(())
         })
-        .on_window_event(|window: &WebviewWindow, event| match event {
+        .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
