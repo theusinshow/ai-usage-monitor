@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { providers } from "../providers";
+import { createDemoUsage } from "../demo/demoUsage";
 import { isTauri, nativeInvoke } from "../services/native";
 import type { AppSettings, ProviderId, ProviderUsage } from "../types/provider";
 
@@ -9,6 +10,8 @@ const defaults: AppSettings = {
   monthlyBudgets: { openai: null, deepseek: null },
   historyRetentionDays: 90,
 };
+
+const demoMode = import.meta.env.DEV && new URLSearchParams(window.location.search).get("demo") === "1";
 
 export function useProviderUsage() {
   const [usage, setUsage] = useState<Partial<Record<ProviderId, ProviderUsage>>>({});
@@ -21,6 +24,14 @@ export function useProviderUsage() {
     if (running.current) return;
     running.current = true;
     setRefreshing(true);
+    if (demoMode) {
+      await new Promise((resolve) => window.setTimeout(resolve, 280));
+      setUsage(createDemoUsage());
+      setLastUpdated(new Date().toISOString());
+      setRefreshing(false);
+      running.current = false;
+      return;
+    }
     const results = await Promise.all(providers.map((provider) => provider.getUsage()));
     setUsage(Object.fromEntries(results.map((item) => [item.providerId, item])));
     setLastUpdated(new Date().toISOString());
@@ -29,7 +40,7 @@ export function useProviderUsage() {
   }, []);
 
   const reloadSettings = useCallback(async () => {
-    if (!isTauri()) return;
+    if (demoMode || !isTauri()) return;
     const value = await nativeInvoke<AppSettings>("get_settings").catch(() => defaults);
     setSettings(value);
   }, []);
@@ -51,5 +62,5 @@ export function useProviderUsage() {
     return () => dispose?.();
   }, [refresh]);
 
-  return { usage, settings, refreshing, lastUpdated, refresh, reloadSettings };
+  return { usage, settings, refreshing, lastUpdated, refresh, reloadSettings, demoMode };
 }

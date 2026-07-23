@@ -16,9 +16,10 @@ export function formatRelativeReset(resetAt?: string, now = Date.now()): string 
   const days = Math.floor(totalSeconds / 86400);
   const hours = Math.floor((totalSeconds % 86400) / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (days > 0) return `Reset em ${days}d ${hours}h`;
-  return `Reset em ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  if (days > 0) return `Reinicia em ${days}d ${hours}h`;
+  if (hours > 0) return `Reinicia em ${hours}h ${minutes}min`;
+  if (minutes > 0) return `Reinicia em ${minutes}min`;
+  return "Reinicia em menos de 1min";
 }
 
 export function formatUpdatedAt(iso?: string): string {

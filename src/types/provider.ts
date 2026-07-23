@@ -20,6 +20,12 @@ export interface UsageMetric {
   formattedValue: string;
 }
 
+export interface UsageTrendPoint {
+  label: string;
+  value: number;
+  formattedValue: string;
+}
+
 export interface ProviderUsage {
   providerId: ProviderId;
   providerName: string;
@@ -33,6 +39,8 @@ export interface ProviderUsage {
   lastUpdated: string;
   source?: "codex-app-server" | "openusage" | "local" | "official-api";
   error?: string;
+  trendLabel?: string;
+  trend?: UsageTrendPoint[];
 }
 
 export interface AIProvider {

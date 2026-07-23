@@ -1,7 +1,8 @@
-import { ArrowLeft, Check, Eye, EyeOff, KeyRound, LoaderCircle, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Eye, EyeOff, KeyRound, LoaderCircle, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { nativeInvoke } from "../services/native";
 import type { AppSettings } from "../types/provider";
+import { ProviderMark } from "../components/ProviderMark/ProviderMark";
 
 type ApiProvider = "openai" | "deepseek";
 
@@ -53,17 +54,20 @@ export function SettingsPage({ settings, onBack, onSaved }: { settings: AppSetti
       <section className="settings-section"><div className="section-heading"><h2>Atualização</h2><p>Consultas são pausadas enquanto outra atualização está em andamento.</p></div>
         <label className="field"><span>Intervalo automático</span><select value={draft.refreshIntervalSeconds} onChange={(event) => setDraft({ ...draft, refreshIntervalSeconds: Number(event.target.value) as AppSettings["refreshIntervalSeconds"] })}><option value={30}>30 segundos</option><option value={60}>1 minuto</option><option value={300}>5 minutos</option><option value={900}>15 minutos</option></select></label>
       </section>
-      <section className="settings-section"><div className="section-heading"><h2>Providers de API</h2><p>As chaves ficam no Windows Credential Manager.</p></div>
+      <section className="settings-section"><div className="section-heading"><h2>Providers de API</h2><p>Conecte somente os serviços que você usa.</p></div>
+        <div className="security-note"><ShieldCheck size={15} /><span><strong>Protegido pelo Windows</strong>As chaves nunca são salvas em arquivos ou logs.</span></div>
         {(["openai", "deepseek"] as const).map((provider) => <div className="credential" key={provider}>
-          <div className="credential__heading"><div><strong>{provider === "openai" ? "OpenAI API" : "DeepSeek API"}</strong><span>{configured[provider] ? <><Check size={12} />Chave salva</> : "Não configurado"}</span></div>{configured[provider] && <button className="icon-button danger" type="button" onClick={() => void removeKey(provider)} aria-label="Remover chave"><Trash2 size={14} /></button>}</div>
+          <div className="credential__heading"><div className="credential__identity"><ProviderMark providerId={provider} /><div><strong>{provider === "openai" ? "OpenAI API" : "DeepSeek API"}</strong><span>{configured[provider] ? <><Check size={12} />Chave salva</> : "Não configurado"}</span></div></div>{configured[provider] && <button className="icon-button danger" type="button" onClick={() => void removeKey(provider)} aria-label="Remover chave"><Trash2 size={14} /></button>}</div>
           <label className="field"><span>API key</span><div className="secret-input"><KeyRound size={14} /><input type={visible[provider] ? "text" : "password"} value={keys[provider]} placeholder={configured[provider] ? "Digite para substituir" : "Cole sua chave"} autoComplete="off" spellCheck={false} onChange={(event) => setKeys({ ...keys, [provider]: event.target.value })}/><button type="button" onClick={() => setVisible({ ...visible, [provider]: !visible[provider] })} aria-label={visible[provider] ? "Ocultar chave" : "Mostrar chave"}>{visible[provider] ? <EyeOff size={14} /> : <Eye size={14} />}</button></div></label>
           <label className="field budget"><span>Orçamento mensal (USD)</span><input type="number" min="0" step="1" value={draft.monthlyBudgets[provider] ?? ""} placeholder="Não definido" onChange={(event) => setDraft({ ...draft, monthlyBudgets: { ...draft.monthlyBudgets, [provider]: event.target.value ? Number(event.target.value) : null } })}/></label>
           <button className="secondary-button" type="button" disabled={!keys[provider].trim() || busy === provider} onClick={() => void saveKey(provider)}>{busy === provider && <LoaderCircle className="spin" size={14} />}{configured[provider] ? "Testar e substituir" : "Salvar e testar"}</button>
         </div>)}
       </section>
-      <p className="settings-message" aria-live="polite">{message}</p>
-      <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void saveSettings()}>{busy === "settings" && <LoaderCircle className="spin" size={14} />}Salvar preferências</button>
       <p className="privacy-note">Sem telemetria. Somente chamadas aos providers configurados saem deste computador.</p>
     </div>
+    <footer className="settings-actions">
+      <p className="settings-message" aria-live="polite">{message}</p>
+      <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void saveSettings()}>{busy === "settings" && <LoaderCircle className="spin" size={14} />}Salvar preferências</button>
+    </footer>
   </main>;
 }

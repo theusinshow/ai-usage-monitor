@@ -43,6 +43,24 @@ npm run dev
 
 Nessa visualização, os providers exibem que o backend Tauri não está disponível. Isso é esperado.
 
+Para revisar barras, resets e métricas sem o backend, use o modo de demonstração disponível somente durante o desenvolvimento:
+
+```text
+http://127.0.0.1:1420/?demo=1
+```
+
+Os dados de demonstração são identificados na interface e nunca são incluídos no build de produção.
+
+### Design Lab
+
+No modo de demonstração, selecione o ícone de laboratório no topo para abrir uma área experimental com barras de progresso, gráficos de uso e estudos de motion. Também é possível acessá-la diretamente:
+
+```text
+http://127.0.0.1:1420/?lab=1
+```
+
+O laboratório usa apenas dados sintéticos, oferece os temas Mineral, Ember e Violet e respeita a preferência de movimento reduzido do Windows. Ele só fica acessível em desenvolvimento e seu código é carregado em um bundle separado da interface principal.
+
 ## Validação
 
 ```powershell
@@ -119,6 +137,10 @@ O banco fica no diretório de dados do aplicativo e guarda apenas configuraçõe
 ```text
 usage_snapshots(provider, timestamp, tokens, cost, percentage)
 ```
+
+## Marcas de terceiros
+
+Os símbolos de OpenAI, Claude Code e DeepSeek são exibidos somente para identificar os serviços monitorados e não indicam endosso ou parceria. O Blossom segue o asset e as diretrizes oficiais da OpenAI; Claude Code e DeepSeek usam paths vetoriais locais fornecidos pelo pacote [Simple Icons](https://github.com/simple-icons/simple-icons). Todas as marcas pertencem aos respectivos titulares.
 
 ## Arquitetura
 
