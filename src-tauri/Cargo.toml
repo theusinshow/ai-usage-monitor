@@ -1,6 +1,6 @@
 [package]
 name = "ai-usage-monitor"
-version = "0.1.1"
+version = "0.1.2"
 description = "Local-first AI usage monitor for Windows"
 authors = ["AI Usage Monitor contributors"]
 edition = "2021"

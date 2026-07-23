@@ -17,7 +17,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewWindowBuilder, WindowEvent,
 };
 use walkdir::WalkDir;
 
@@ -887,6 +887,13 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .first()
+                .ok_or_else(|| std::io::Error::other("main window configuration is missing"))?;
+            let window = WebviewWindowBuilder::from_config(app.handle(), window_config)?.build()?;
             let data_dir: PathBuf = app.path().app_data_dir()?;
             let db = initialize_database(&data_dir.join("usage.sqlite3"))
                 .map_err(|error| std::io::Error::other(safe_error(&error)))?;
@@ -894,7 +901,8 @@ pub fn run() {
                 database: Mutex::new(db),
             });
             configure_tray(app.handle())?;
-            show_main(app.handle());
+            window.show()?;
+            window.set_focus()?;
             Ok(())
         })
         .on_window_event(|window, event| match event {
