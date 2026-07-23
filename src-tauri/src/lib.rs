@@ -894,14 +894,12 @@ pub fn run() {
                 database: Mutex::new(db),
             });
             configure_tray(app.handle())?;
+            show_main(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| match event {
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let _ = window.hide();
-            }
-            WindowEvent::Focused(false) => {
                 let _ = window.hide();
             }
             _ => {}
