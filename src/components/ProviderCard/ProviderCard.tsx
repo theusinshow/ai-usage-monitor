@@ -1,4 +1,4 @@
-import { RotateCcw, Settings2 } from "lucide-react";
+import { ChevronRight, RotateCcw, Settings2 } from "lucide-react";
 import type { ProviderUsage } from "../../types/provider";
 import { formatUpdatedAt } from "../../utils/format";
 import { StatusBadge } from "../StatusBadge/StatusBadge";
@@ -6,16 +6,18 @@ import { UsageProgress } from "../UsageProgress/UsageProgress";
 import { ProviderMark } from "../ProviderMark/ProviderMark";
 import { ProviderTrend } from "../ProviderTrend/ProviderTrend";
 
-export function ProviderCard({ usage, onRetry, onConfigure }: {
+export function ProviderCard({ usage, onRetry, onConfigure, onOpen }: {
   usage: ProviderUsage;
   onRetry: () => void;
   onConfigure: () => void;
+  onOpen: () => void;
 }) {
   const empty = usage.limits.length === 0 && usage.metrics.length === 0;
   const hasMultipleLimits = usage.limits.length > 1;
 
   return (
     <article id={`provider-row-${usage.providerId}`} className={`provider-tile provider-tile--${usage.status}`} data-provider={usage.providerId} aria-labelledby={`provider-${usage.providerId}`}>
+      <button className="provider-tile__open" type="button" onClick={onOpen} aria-label={`Abrir análise detalhada de ${usage.providerName}`} />
       <header className="provider-tile__header">
         <div className="provider__identity">
           <ProviderMark providerId={usage.providerId} />
@@ -61,7 +63,8 @@ export function ProviderCard({ usage, onRetry, onConfigure }: {
       <footer className="provider-tile__footer">
         <span>{formatUpdatedAt(usage.lastUpdated).replace("Atualizado às ", "")}</span>
         <span>{usage.source ? sourceLabel(usage.source) : "Fonte não informada"}</span>
-        <button type="button" onClick={onConfigure}>Configurar</button>
+        <button className="provider-tile__details" type="button" onClick={onOpen}>Ver análise <ChevronRight size={12} /></button>
+        <button className="provider-tile__configure" type="button" onClick={onConfigure}>Configurar</button>
       </footer>
     </article>
   );

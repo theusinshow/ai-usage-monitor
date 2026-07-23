@@ -5,7 +5,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs::{self, File},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -64,6 +64,27 @@ struct ProviderUsage {
     last_updated: String,
     source: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHistoryPoint {
+    timestamp: String,
+    label: String,
+    tokens: Option<f64>,
+    cost: Option<f64>,
+    balance: Option<f64>,
+    percentage: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProviderHistory {
+    provider_id: String,
+    range_days: i64,
+    points: Vec<ProviderHistoryPoint>,
+    collected_since: Option<String>,
+    source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +253,83 @@ fn get_provider_usage(provider_id: String, state: State<'_, AppState>) -> Provid
         let _ = save_snapshot(&db, &usage);
     }
     usage
+}
+
+#[tauri::command]
+fn get_provider_history(
+    provider_id: String,
+    range_days: i64,
+    state: State<'_, AppState>,
+) -> Result<ProviderHistory, String> {
+    if !matches!(
+        provider_id.as_str(),
+        "codex" | "claude" | "openai" | "deepseek"
+    ) {
+        return Err("Provider desconhecido.".into());
+    }
+    if !matches!(range_days, 7 | 30 | 90) {
+        return Err("Período de histórico inválido.".into());
+    }
+    if provider_id == "claude" {
+        let points = claude_history(range_days)?;
+        let collected_since = points.first().map(|point| point.timestamp.clone());
+        return Ok(ProviderHistory {
+            provider_id,
+            range_days,
+            points,
+            collected_since,
+            source: "provider-local".into(),
+        });
+    }
+
+    let db = state
+        .database
+        .lock()
+        .map_err(|_| "Banco local indisponível.".to_string())?;
+    let mut statement = db
+        .prepare(
+            "SELECT date(timestamp, 'localtime') AS bucket,
+                    MAX(tokens),
+                    MAX(cost),
+                    MAX(balance),
+                    MAX(percentage)
+             FROM usage_snapshots
+             WHERE provider = ?1
+               AND datetime(timestamp) >= datetime('now', ?2)
+             GROUP BY bucket
+             ORDER BY bucket",
+        )
+        .map_err(|error| error.to_string())?;
+    let window = format!("-{range_days} days");
+    let points = statement
+        .query_map(params![provider_id, window], |row| {
+            let timestamp: String = row.get(0)?;
+            Ok(ProviderHistoryPoint {
+                label: compact_date_label(&timestamp),
+                timestamp,
+                tokens: row.get(1)?,
+                cost: row.get(2)?,
+                balance: row.get(3)?,
+                percentage: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let collected_since = db
+        .query_row(
+            "SELECT MIN(timestamp) FROM usage_snapshots WHERE provider = ?1",
+            [&provider_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(ProviderHistory {
+        provider_id,
+        range_days,
+        points,
+        collected_since,
+        source: "snapshots".into(),
+    })
 }
 
 #[tauri::command]
@@ -495,6 +593,67 @@ fn claude_usage() -> ProviderUsage {
         source: Some("local".into()),
         error,
     }
+}
+
+fn claude_history(days: i64) -> Result<Vec<ProviderHistoryPoint>, String> {
+    let root = dirs::home_dir()
+        .ok_or("Pasta de usuário não encontrada.")?
+        .join(".claude")
+        .join("projects");
+    if !root.exists() {
+        return Ok(vec![]);
+    }
+    let today = Local::now().date_naive();
+    let cutoff = today - chrono::Duration::days(days.saturating_sub(1));
+    let mut daily_tokens: BTreeMap<chrono::NaiveDate, f64> = BTreeMap::new();
+
+    for entry in WalkDir::new(&root)
+        .max_depth(4)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "jsonl"))
+    {
+        let Ok(file) = File::open(entry.path()) else {
+            continue;
+        };
+        for line in BufReader::new(file).lines().map_while(Result::ok) {
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(timestamp) = value
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
+                .map(|date| date.with_timezone(&Local))
+            else {
+                continue;
+            };
+            let date = timestamp.date_naive();
+            if date < cutoff || date > today {
+                continue;
+            }
+            let tokens = value
+                .pointer("/message/usage")
+                .or_else(|| value.get("usage"))
+                .map(sum_token_fields)
+                .unwrap_or_default();
+            if tokens > 0.0 {
+                *daily_tokens.entry(date).or_default() += tokens;
+            }
+        }
+    }
+
+    Ok(daily_tokens
+        .into_iter()
+        .map(|(date, tokens)| ProviderHistoryPoint {
+            timestamp: date.format("%Y-%m-%d").to_string(),
+            label: date.format("%d/%m").to_string(),
+            tokens: Some(tokens),
+            cost: None,
+            balance: None,
+            percentage: None,
+        })
+        .collect())
 }
 
 fn sum_token_fields(value: &Value) -> f64 {
@@ -797,12 +956,19 @@ fn title_case(value: &str) -> String {
         .unwrap_or_default()
 }
 
+fn compact_date_label(value: &str) -> String {
+    chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|date| date.format("%d/%m").to_string())
+        .unwrap_or_else(|_| value.to_string())
+}
+
 fn initialize_database(path: &Path) -> Result<Connection, String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let connection = Connection::open(path).map_err(|error| error.to_string())?;
-    connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS usage_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, timestamp TEXT NOT NULL, tokens REAL, cost REAL, percentage REAL); CREATE INDEX IF NOT EXISTS idx_usage_snapshots_provider_time ON usage_snapshots(provider, timestamp);").map_err(|error| error.to_string())?;
+    connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS usage_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, timestamp TEXT NOT NULL, tokens REAL, cost REAL, balance REAL, percentage REAL); CREATE INDEX IF NOT EXISTS idx_usage_snapshots_provider_time ON usage_snapshots(provider, timestamp);").map_err(|error| error.to_string())?;
+    let _ = connection.execute("ALTER TABLE usage_snapshots ADD COLUMN balance REAL", []);
     Ok(connection)
 }
 
@@ -817,11 +983,16 @@ fn save_snapshot(db: &Connection, usage: &ProviderUsage) -> Result<(), String> {
         .iter()
         .find(|metric| metric.id == "spentMonth")
         .and_then(|metric| metric.value);
+    let balance = usage
+        .metrics
+        .iter()
+        .find(|metric| metric.id == "balance")
+        .and_then(|metric| metric.value);
     let percentage = usage.limits.first().and_then(|limit| limit.percentage_used);
-    if tokens.is_none() && cost.is_none() && percentage.is_none() {
+    if tokens.is_none() && cost.is_none() && balance.is_none() && percentage.is_none() {
         return Ok(());
     }
-    db.execute("INSERT INTO usage_snapshots (provider, timestamp, tokens, cost, percentage) VALUES (?1, ?2, ?3, ?4, ?5)", params![usage.provider_id, usage.last_updated, tokens, cost, percentage]).map_err(|error| error.to_string())?;
+    db.execute("INSERT INTO usage_snapshots (provider, timestamp, tokens, cost, balance, percentage) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![usage.provider_id, usage.last_updated, tokens, cost, balance, percentage]).map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -920,6 +1091,7 @@ pub fn run() {
             save_settings,
             is_provider_available,
             get_provider_usage,
+            get_provider_history,
             test_provider_connection,
             is_openusage_available,
             run_openusage_report

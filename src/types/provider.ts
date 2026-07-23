@@ -26,6 +26,23 @@ export interface UsageTrendPoint {
   formattedValue: string;
 }
 
+export interface ProviderHistoryPoint {
+  timestamp: string;
+  label: string;
+  tokens?: number;
+  cost?: number;
+  balance?: number;
+  percentage?: number;
+}
+
+export interface ProviderHistory {
+  providerId: ProviderId;
+  rangeDays: number;
+  points: ProviderHistoryPoint[];
+  collectedSince?: string;
+  source: "provider-local" | "snapshots";
+}
+
 export interface ProviderUsage {
   providerId: ProviderId;
   providerName: string;

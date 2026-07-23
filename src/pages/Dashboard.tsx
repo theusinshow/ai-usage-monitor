@@ -19,13 +19,14 @@ const order: Array<{ id: ProviderId; name: string }> = [
   { id: "openai", name: "OpenAI API" },
 ];
 
-export function Dashboard({ usage, refreshing, lastUpdated, demoMode, onRefresh, onSettings, onLab }: {
+export function Dashboard({ usage, refreshing, lastUpdated, demoMode, onRefresh, onSettings, onOpenProvider, onLab }: {
   usage: Partial<Record<ProviderId, ProviderUsage>>;
   refreshing: boolean;
   lastUpdated?: string;
   demoMode: boolean;
   onRefresh: () => void;
   onSettings: () => void;
+  onOpenProvider: (providerId: ProviderId) => void;
   onLab?: () => void;
 }) {
   const providers = order.map(({ id }) => usage[id]).filter((item): item is ProviderUsage => Boolean(item));
@@ -98,7 +99,7 @@ export function Dashboard({ usage, refreshing, lastUpdated, demoMode, onRefresh,
         </header>
         <div className="provider-grid">
           {order.map(({ id, name }) => usage[id]
-            ? <ProviderCard key={id} usage={usage[id]} onRetry={onRefresh} onConfigure={onSettings} />
+            ? <ProviderCard key={id} usage={usage[id]} onRetry={onRefresh} onConfigure={onSettings} onOpen={() => onOpenProvider(id)} />
             : <ProviderSkeleton key={id} name={name} />)}
         </div>
       </section>
