@@ -17,7 +17,7 @@ export function ProviderCard({ usage, onRetry, onConfigure, onOpen }: {
 
   return (
     <article id={`provider-row-${usage.providerId}`} className={`provider-tile provider-tile--${usage.status}`} data-provider={usage.providerId} aria-labelledby={`provider-${usage.providerId}`}>
-      <button className="provider-tile__open" type="button" onClick={onOpen} aria-label={`Abrir análise detalhada de ${usage.providerName}`} />
+      <button className="provider-tile__open" type="button" onClick={onOpen} tabIndex={-1} aria-hidden="true" />
       <header className="provider-tile__header">
         <div className="provider__identity">
           <ProviderMark providerId={usage.providerId} />
@@ -63,7 +63,7 @@ export function ProviderCard({ usage, onRetry, onConfigure, onOpen }: {
       <footer className="provider-tile__footer">
         <span>{formatUpdatedAt(usage.lastUpdated).replace("Atualizado às ", "")}</span>
         <span>{usage.source ? sourceLabel(usage.source) : "Fonte não informada"}</span>
-        <button className="provider-tile__details" type="button" onClick={onOpen}>Ver análise <ChevronRight size={12} /></button>
+        <button className="provider-tile__details" type="button" onClick={onOpen} aria-label={`Ver análise de ${usage.providerName}`}>Ver análise <ChevronRight size={12} /></button>
         <button className="provider-tile__configure" type="button" onClick={onConfigure}>Configurar</button>
       </footer>
     </article>
@@ -71,12 +71,13 @@ export function ProviderCard({ usage, onRetry, onConfigure, onOpen }: {
 }
 
 function providerTypeLabel(usage: ProviderUsage) {
+  if (usage.providerId === "codex") return "Assinatura ChatGPT";
   return usage.type === "subscription" ? "Assinatura local" : "API por consumo";
 }
 
 function sourceLabel(source: NonNullable<ProviderUsage["source"]>) {
   return ({
-    "codex-app-server": "Codex local",
+    "codex-app-server": "Codex App Server",
     openusage: "OpenUsage",
     local: "Histórico local",
     "claude-oauth": "Claude OAuth + local",

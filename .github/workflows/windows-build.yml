@@ -42,6 +42,9 @@ jobs:
       - name: Validate frontend
         run: npm run lint
 
+      - name: Validate Rust integration
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
       - name: Build desktop application
         run: npm run tauri build
 

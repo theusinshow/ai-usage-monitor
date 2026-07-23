@@ -1,22 +1,46 @@
 import { ArrowLeft, Check, Eye, EyeOff, KeyRound, LoaderCircle, ShieldCheck, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { nativeInvoke } from "../services/native";
 import type { AppSettings } from "../types/provider";
 import { ProviderMark } from "../components/ProviderMark/ProviderMark";
 
 type ApiProvider = "openai" | "deepseek";
 
-export function SettingsPage({ settings, onBack, onSaved }: { settings: AppSettings; onBack: () => void; onSaved: () => Promise<void> }) {
+export function SettingsPage({ settings, backLabel, onBack, onSaved }: {
+  settings: AppSettings;
+  backLabel: string;
+  onBack: () => void;
+  onSaved: () => Promise<void>;
+}) {
   const [draft, setDraft] = useState(settings);
   const [keys, setKeys] = useState<Record<ApiProvider, string>>({ openai: "", deepseek: "" });
   const [configured, setConfigured] = useState<Record<ApiProvider, boolean>>({ openai: false, deepseek: false });
   const [visible, setVisible] = useState<Record<ApiProvider, boolean>>({ openai: false, deepseek: false });
   const [busy, setBusy] = useState<ApiProvider | "settings" | null>(null);
   const [message, setMessage] = useState("");
+  const hasUnsavedChanges = JSON.stringify(draft) !== JSON.stringify(settings)
+    || Object.values(keys).some((key) => key.trim().length > 0);
 
   useEffect(() => {
     void nativeInvoke<Record<ApiProvider, boolean>>("get_credential_status").then(setConfigured).catch(() => undefined);
   }, []);
+
+  const requestBack = useCallback(() => {
+    if (busy !== null) return;
+    if (hasUnsavedChanges && !window.confirm("Descartar as alterações que ainda não foram salvas?")) return;
+    onBack();
+  }, [busy, hasUnsavedChanges, onBack]);
+
+  useEffect(() => {
+    const handleKeyboardBack = (event: KeyboardEvent) => {
+      if ((event.altKey && event.key === "ArrowLeft") || event.key === "BrowserBack") {
+        event.preventDefault();
+        requestBack();
+      }
+    };
+    window.addEventListener("keydown", handleKeyboardBack);
+    return () => window.removeEventListener("keydown", handleKeyboardBack);
+  }, [requestBack]);
 
   async function saveKey(provider: ApiProvider) {
     if (!keys[provider].trim()) return;
@@ -49,7 +73,7 @@ export function SettingsPage({ settings, onBack, onSaved }: { settings: AppSetti
   }
 
   return <main className="app-shell settings-page">
-    <header className="topbar settings-topbar"><button className="icon-button" type="button" onClick={onBack} aria-label="Voltar"><ArrowLeft size={17} /></button><h1>Configurações</h1><span /></header>
+    <header className="topbar settings-topbar"><button className="back-button" type="button" onClick={requestBack} disabled={busy !== null} aria-label={backLabel} title={`${backLabel} (Alt + ←)`}><ArrowLeft size={16} /><span>Voltar</span></button><h1>Configurações</h1><span aria-hidden="true" /></header>
     <div className="settings-content">
       <section className="settings-section"><div className="section-heading"><h2>Atualização</h2><p>Consultas são pausadas enquanto outra atualização está em andamento.</p></div>
         <label className="field"><span>Intervalo automático</span><select value={draft.refreshIntervalSeconds} onChange={(event) => setDraft({ ...draft, refreshIntervalSeconds: Number(event.target.value) as AppSettings["refreshIntervalSeconds"] })}><option value={30}>30 segundos</option><option value={60}>1 minuto</option><option value={300}>5 minutos</option><option value={900}>15 minutos</option></select></label>
@@ -66,7 +90,7 @@ export function SettingsPage({ settings, onBack, onSaved }: { settings: AppSetti
       <p className="privacy-note">Sem telemetria. Somente chamadas aos providers configurados saem deste computador.</p>
     </div>
     <footer className="settings-actions">
-      <p className="settings-message" aria-live="polite">{message}</p>
+      <p className="settings-message" aria-live="polite">{message || (hasUnsavedChanges ? "Alterações ainda não salvas." : "")}</p>
       <button className="primary-button" type="button" disabled={busy !== null} onClick={() => void saveSettings()}>{busy === "settings" && <LoaderCircle className="spin" size={14} />}Salvar preferências</button>
     </footer>
   </main>;

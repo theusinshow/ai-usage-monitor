@@ -221,7 +221,7 @@ fn save_settings(settings: AppSettings, state: State<'_, AppState>) -> Result<()
 #[tauri::command]
 fn is_provider_available(provider_id: String) -> bool {
     match provider_id.as_str() {
-        "codex" => which::which("codex").is_ok(),
+        "codex" => codex_app_server_command().is_ok(),
         "claude" => {
             which::which("claude").is_ok()
                 || dirs::home_dir().is_some_and(|home| home.join(".claude").exists())
@@ -374,7 +374,7 @@ fn run_openusage_report(report: String) -> Result<OpenUsageReport, String> {
 }
 
 fn codex_usage() -> ProviderUsage {
-    if which::which("codex").is_err() {
+    if codex_app_server_command().is_err() {
         return empty_usage(
             "codex",
             "notInstalled",
@@ -383,41 +383,77 @@ fn codex_usage() -> ProviderUsage {
     }
     match query_codex_app_server() {
         Ok((account, rate_result)) => {
+            let rates = codex_rate_limits(&rate_result);
             let plan = account
                 .pointer("/account/planType")
                 .and_then(Value::as_str)
+                .or_else(|| rates.get("planType").and_then(Value::as_str))
                 .map(title_case);
-            let rates = rate_result
-                .pointer("/rateLimits")
-                .cloned()
-                .unwrap_or(Value::Null);
             let mut limits = Vec::new();
-            for (id, label, key) in [
-                ("primary", "5 horas", "primary"),
-                ("secondary", "Semanal", "secondary"),
-            ] {
+            for (id, key) in [("primary", "primary"), ("secondary", "secondary")] {
                 if let Some(value) = rates.get(key).filter(|value| !value.is_null()) {
                     let minutes = value.get("windowDurationMins").and_then(Value::as_u64);
-                    let resolved_label = match minutes {
-                        Some(0..=360) => "5 horas",
-                        Some(361..) => "Semanal",
-                        None => label,
-                    };
+                    let percentage_used = value.get("usedPercent").and_then(Value::as_f64);
                     limits.push(UsageLimit {
                         id: id.into(),
-                        name: resolved_label.into(),
+                        name: codex_window_label(minutes, id),
                         used: None,
                         remaining: None,
                         limit: None,
-                        percentage_used: value.get("usedPercent").and_then(Value::as_f64),
+                        percentage_used,
                         reset_at: value
                             .get("resetsAt")
                             .and_then(Value::as_i64)
                             .and_then(unix_to_iso),
-                        detail: None,
+                        detail: percentage_used.map(|used| {
+                            format!("{:.0}% disponível", (100.0 - used).clamp(0.0, 100.0))
+                        }),
                     });
                 }
             }
+            let mut metrics = Vec::new();
+            let has_credits = rates
+                .pointer("/credits/hasCredits")
+                .and_then(Value::as_bool)
+                == Some(true);
+            let unlimited_credits =
+                rates.pointer("/credits/unlimited").and_then(Value::as_bool) == Some(true);
+            if unlimited_credits {
+                metrics.push(UsageMetric {
+                    id: "creditsBalance".into(),
+                    label: "Créditos".into(),
+                    value: None,
+                    formatted_value: "Ilimitados".into(),
+                });
+            } else if let Some(balance) = has_credits
+                .then(|| rates.pointer("/credits/balance").and_then(json_number))
+                .flatten()
+            {
+                metrics.push(metric(
+                    "creditsBalance",
+                    "Créditos",
+                    balance,
+                    format_currency(balance, "USD"),
+                ));
+            }
+            if let Some(available) = rate_result
+                .pointer("/rateLimitResetCredits/availableCount")
+                .and_then(Value::as_u64)
+                .filter(|value| *value > 0)
+            {
+                metrics.push(metric(
+                    "rateLimitResets",
+                    "Resets disponíveis",
+                    available as f64,
+                    available.to_string(),
+                ));
+            }
+            let account_type = account.pointer("/account/type").and_then(Value::as_str);
+            let spend_control_reached = rates
+                .get("spendControlReached")
+                .or_else(|| rate_result.get("spendControlReached"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             ProviderUsage {
                 provider_id: "codex".into(),
                 provider_name: "Codex".into(),
@@ -425,12 +461,13 @@ fn codex_usage() -> ProviderUsage {
                 status: "connected".into(),
                 connected: true,
                 plan,
-                model: None,
+                model: (account_type == Some("chatgpt")).then(|| "Conta ChatGPT".into()),
                 limits,
-                metrics: vec![],
+                metrics,
                 last_updated: Utc::now().to_rfc3339(),
                 source: Some("codex-app-server".into()),
-                error: None,
+                error: spend_control_reached
+                    .then(|| "O controle de gastos da conta ChatGPT foi atingido.".into()),
             }
         }
         Err(error) => empty_usage(
@@ -444,28 +481,82 @@ fn codex_usage() -> ProviderUsage {
     }
 }
 
+fn codex_rate_limits(rate_result: &Value) -> Value {
+    let direct = rate_result
+        .pointer("/rateLimits")
+        .filter(|value| value.get("primary").is_some() || value.get("secondary").is_some());
+    if let Some(value) = direct {
+        return value.clone();
+    }
+    rate_result
+        .pointer("/rateLimitsByLimitId")
+        .and_then(Value::as_object)
+        .and_then(|limits| {
+            limits.get("codex").or_else(|| {
+                limits.values().find(|value| {
+                    value.get("primary").is_some() || value.get("secondary").is_some()
+                })
+            })
+        })
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn codex_window_label(minutes: Option<u64>, fallback: &str) -> String {
+    match minutes {
+        Some(300) => "Sessão · 5h".into(),
+        Some(10_080) => "Semanal · 7d".into(),
+        Some(value) if value < 1_440 && value % 60 == 0 => {
+            format!("Janela · {}h", value / 60)
+        }
+        Some(value) if value % 1_440 == 0 => {
+            format!("Janela · {}d", value / 1_440)
+        }
+        Some(value) => format!("Janela · {value} min"),
+        None if fallback == "primary" => "Sessão".into(),
+        None => "Semanal".into(),
+    }
+}
+
+fn json_number(value: &Value) -> Option<f64> {
+    value
+        .as_f64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
+fn codex_app_server_command() -> Result<Command, String> {
+    #[cfg(windows)]
+    {
+        if let Ok(path) = which::which("codex.cmd") {
+            let mut command = Command::new("cmd.exe");
+            command.args(["/D", "/S", "/C"]).arg(path).arg("app-server");
+            return Ok(command);
+        }
+        if let Ok(path) = which::which("codex.exe") {
+            let mut command = Command::new(path);
+            command.arg("app-server");
+            return Ok(command);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(path) = which::which("codex") {
+            let mut command = Command::new(path);
+            command.arg("app-server");
+            return Ok(command);
+        }
+    }
+    Err("Executável do Codex não encontrado.".into())
+}
+
 fn query_codex_app_server() -> Result<(Value, Value), String> {
-    let mut child = Command::new("codex")
-        .arg("app-server")
+    let mut child = codex_app_server_command()?
         .creation_flags_no_window()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| error.to_string())?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or("Não foi possível abrir o Codex app-server.")?;
-    for line in [
-        json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"ai_usage_monitor","title":"AI Usage Monitor","version":"0.1.0"}}}),
-        json!({"method":"initialized","params":{}}),
-        json!({"method":"account/read","id":2,"params":{"refreshToken":false}}),
-        json!({"method":"account/rateLimits/read","id":3}),
-    ] {
-        writeln!(stdin, "{line}").map_err(|error| error.to_string())?;
-    }
-    drop(stdin);
     let stdout = child.stdout.take().ok_or("Codex não retornou dados.")?;
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -475,25 +566,92 @@ fn query_codex_app_server() -> Result<(Value, Value), String> {
             }
         }
     });
-    let deadline = std::time::Instant::now() + Duration::from_secs(12);
-    let mut account = None;
-    let mut rates = None;
-    while std::time::Instant::now() < deadline && (account.is_none() || rates.is_none()) {
-        match receiver.recv_timeout(Duration::from_millis(400)) {
-            Ok(value) => match value.get("id").and_then(Value::as_i64) {
-                Some(2) => account = value.get("result").cloned(),
-                Some(3) => rates = value.get("result").cloned(),
-                _ => {}
-            },
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or("Não foi possível abrir o Codex app-server.")?;
+    let result = (|| -> Result<(Value, Value), String> {
+        writeln!(
+            stdin,
+            "{}",
+            json!({"method":"initialize","id":1,"params":{"clientInfo":{"name":"ai_usage_monitor","title":"AI Usage Monitor","version":"1.0.0"}}})
+        )
+        .map_err(|error| error.to_string())?;
+        stdin.flush().map_err(|error| error.to_string())?;
+        wait_for_codex_rpc(&receiver, 1, Duration::from_secs(6))?;
+
+        for line in [
+            json!({"method":"initialized","params":{}}),
+            json!({"method":"account/read","id":2,"params":{"refreshToken":false}}),
+            json!({"method":"account/rateLimits/read","id":3}),
+        ] {
+            writeln!(stdin, "{line}").map_err(|error| error.to_string())?;
+        }
+        stdin.flush().map_err(|error| error.to_string())?;
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(12);
+        let mut account = None;
+        let mut rates = None;
+        let mut account_error = None;
+        let mut rates_error = None;
+        while std::time::Instant::now() < deadline && (account.is_none() || rates.is_none()) {
+            match receiver.recv_timeout(Duration::from_millis(400)) {
+                Ok(value) => match value.get("id").and_then(Value::as_i64) {
+                    Some(2) => {
+                        account = value.get("result").cloned();
+                        account_error = codex_rpc_error(&value);
+                    }
+                    Some(3) => {
+                        rates = value.get("result").cloned();
+                        rates_error = codex_rpc_error(&value);
+                    }
+                    _ => {}
+                },
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+        }
+        Ok((
+            account.ok_or_else(|| {
+                account_error.unwrap_or_else(|| "Conta Codex não autenticada.".into())
+            })?,
+            rates.ok_or_else(|| {
+                rates_error.unwrap_or_else(|| "Limites Codex indisponíveis.".into())
+            })?,
+        ))
+    })();
+    drop(stdin);
+    let _ = child.kill();
+    result
+}
+
+fn wait_for_codex_rpc(
+    receiver: &mpsc::Receiver<Value>,
+    expected_id: i64,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        match receiver.recv_timeout(Duration::from_millis(300)) {
+            Ok(value) if value.get("id").and_then(Value::as_i64) == Some(expected_id) => {
+                if let Some(result) = value.get("result") {
+                    return Ok(result.clone());
+                }
+                return Err(codex_rpc_error(&value)
+                    .unwrap_or_else(|| "O Codex rejeitou a inicialização.".into()));
+            }
+            Ok(_) | Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
         }
     }
-    let _ = child.kill();
-    Ok((
-        account.ok_or("Conta Codex não autenticada.")?,
-        rates.ok_or("Limites Codex indisponíveis.")?,
-    ))
+    Err("O Codex não respondeu à inicialização.".into())
+}
+
+fn codex_rpc_error(value: &Value) -> Option<String> {
+    value
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .map(safe_error)
 }
 
 fn claude_usage() -> ProviderUsage {
@@ -997,6 +1155,7 @@ fn metric(id: &str, label: &str, value: f64, formatted_value: String) -> UsageMe
     }
 }
 fn format_currency(value: f64, currency: &str) -> String {
+    let value = if value.abs() < 0.005 { 0.0 } else { value };
     if currency == "USD" {
         format!("US$ {:.2}", value).replace('.', ",")
     } else {
@@ -1192,5 +1351,48 @@ impl WindowsNoWindow for Command {
             self.creation_flags(0x08000000);
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_known_codex_windows() {
+        assert_eq!(codex_window_label(Some(300), "primary"), "Sessão · 5h");
+        assert_eq!(
+            codex_window_label(Some(10_080), "secondary"),
+            "Semanal · 7d"
+        );
+        assert_eq!(codex_window_label(Some(120), "primary"), "Janela · 2h");
+    }
+
+    #[test]
+    fn reads_direct_codex_rate_limits() {
+        let payload = json!({
+            "rateLimits": {
+                "primary": { "usedPercent": 25, "windowDurationMins": 300 },
+                "secondary": { "usedPercent": 30, "windowDurationMins": 10080 }
+            }
+        });
+        let rates = codex_rate_limits(&payload);
+        assert_eq!(rates.pointer("/primary/usedPercent"), Some(&json!(25)));
+        assert_eq!(rates.pointer("/secondary/usedPercent"), Some(&json!(30)));
+    }
+
+    #[test]
+    fn supports_rate_limits_grouped_by_limit_id() {
+        let payload = json!({
+            "rateLimits": null,
+            "rateLimitsByLimitId": {
+                "codex": {
+                    "primary": { "usedPercent": 18 },
+                    "secondary": null
+                }
+            }
+        });
+        let rates = codex_rate_limits(&payload);
+        assert_eq!(rates.pointer("/primary/usedPercent"), Some(&json!(18)));
     }
 }

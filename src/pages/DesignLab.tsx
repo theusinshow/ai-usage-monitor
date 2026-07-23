@@ -225,7 +225,7 @@ export default function DesignLab({ onBack }: { onBack: () => void }) {
 
   return <main className="app-shell design-lab" data-lab-theme={theme}>
     <header className="lab-topbar">
-      <button className="icon-button" type="button" onClick={onBack} aria-label="Voltar ao monitor"><ArrowLeft size={16} /></button>
+      <button className="icon-button" type="button" onClick={onBack} aria-label="Voltar ao monitor" title="Voltar ao monitor (Alt + ←)"><ArrowLeft size={16} /></button>
       <div><span>Área experimental</span><h1>Design Lab</h1></div>
       <button className={`lab-motion-toggle ${motionEnabled ? "is-on" : ""}`} type="button" onClick={() => setMotionEnabled((current) => !current)} aria-pressed={motionEnabled} title={motionEnabled ? "Desativar motion" : "Ativar motion"}>{motionEnabled ? <Pause size={13} /> : <Play size={13} />}<span>Motion</span></button>
     </header>

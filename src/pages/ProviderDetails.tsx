@@ -32,6 +32,11 @@ import { UsageProgress } from "../components/UsageProgress/UsageProgress";
 type RangeDays = 7 | 30 | 90;
 type SeriesKind = "tokens" | "cost" | "balance" | "percentage" | "none";
 
+function readSavedRange(): RangeDays {
+  const saved = Number(window.sessionStorage.getItem("ai-usage-monitor:history-range"));
+  return saved === 7 || saved === 30 || saved === 90 ? saved : 30;
+}
+
 export function ProviderDetails({
   usage,
   providers,
@@ -51,7 +56,7 @@ export function ProviderDetails({
   onSettings: () => void;
   onSelectProvider: (providerId: ProviderId) => void;
 }) {
-  const [rangeDays, setRangeDays] = useState<RangeDays>(30);
+  const [rangeDays, setRangeDays] = useState<RangeDays>(readSavedRange);
   const historyKey = `${usage.providerId}:${rangeDays}:${demoMode ? "demo" : "real"}`;
   const [historyState, setHistoryState] = useState<{
     key?: string;
@@ -61,6 +66,10 @@ export function ProviderDetails({
   const history = historyState.key === historyKey ? historyState.data : undefined;
   const historyError = historyState.key === historyKey ? historyState.error : undefined;
   const historyLoading = historyState.key !== historyKey;
+
+  useEffect(() => {
+    window.sessionStorage.setItem("ai-usage-monitor:history-range", String(rangeDays));
+  }, [rangeDays]);
 
   useEffect(() => {
     let active = true;
@@ -107,18 +116,19 @@ export function ProviderDetails({
       aria-labelledby="provider-detail-title"
     >
       <header className="detail-topbar">
-        <button className="icon-button" type="button" onClick={onBack} aria-label="Voltar ao início">
-          <ArrowLeft size={18} />
+        <button className="back-button" type="button" onClick={onBack} aria-label="Voltar para a Home" title="Voltar para a Home (Alt + ←)">
+          <ArrowLeft size={16} />
+          <span>Voltar</span>
         </button>
         <div className="detail-breadcrumb">
-          <span>Providers</span>
+          <span>Home</span>
           <strong>{usage.providerName}</strong>
         </div>
         <div className="detail-actions">
-          <button className="icon-button" type="button" onClick={onRefresh} disabled={refreshing} aria-label="Atualizar agora">
+          <button className="icon-button" type="button" onClick={onRefresh} disabled={refreshing} aria-label="Atualizar agora" title="Atualizar agora">
             <RefreshCw className={refreshing ? "spin" : ""} size={17} />
           </button>
-          <button className="icon-button" type="button" onClick={onSettings} aria-label="Configurações">
+          <button className="icon-button" type="button" onClick={onSettings} aria-label="Configurações" title="Configurações">
             <Settings size={17} />
           </button>
         </div>
@@ -132,6 +142,9 @@ export function ProviderDetails({
             data-provider={provider.providerId}
             className={provider.providerId === usage.providerId ? "is-active" : ""}
             onClick={() => onSelectProvider(provider.providerId)}
+            aria-current={provider.providerId === usage.providerId ? "page" : undefined}
+            aria-label={`${provider.providerName}: ${statusLabel(provider.status)}`}
+            title={provider.providerName}
           >
             <ProviderMark providerId={provider.providerId} />
             <span>{provider.providerName}</span>
@@ -145,7 +158,7 @@ export function ProviderDetails({
           <div className="detail-identity">
             <ProviderMark providerId={usage.providerId} />
             <div>
-              <span>{usage.type === "subscription" ? "Assinatura local" : "API por consumo"}</span>
+              <span>{providerTypeLabel(usage)}</span>
               <h1 id="provider-detail-title">{usage.providerName}</h1>
               <p>{[usage.plan, usage.model, sourceLabel(usage.source)].filter(Boolean).join(" · ")}</p>
             </div>
@@ -205,7 +218,7 @@ export function ProviderDetails({
               )}
               {!historyLoading && chartData.length > 0 && (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={chartData} margin={{ top: 12, right: 8, left: -18, bottom: 0 }}>
+                  <AreaChart accessibilityLayer data={chartData} margin={{ top: 12, right: 8, left: -18, bottom: 0 }}>
                     <defs>
                       <linearGradient id={`history-fill-${usage.providerId}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="var(--provider-color)" stopOpacity={0.28} />
@@ -235,6 +248,9 @@ export function ProviderDetails({
                   </AreaChart>
                 </ResponsiveContainer>
               )}
+              {!historyLoading && chartData.length > 0 && (
+                <p className="sr-only">{historyAccessibilitySummary(chartData, seriesKind)}</p>
+              )}
             </div>
 
             <section className="daily-section">
@@ -248,7 +264,7 @@ export function ProviderDetails({
               <div className="daily-chart">
                 {chartData.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+                    <BarChart accessibilityLayer data={chartData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
                       <CartesianGrid vertical={false} stroke="var(--border-soft)" strokeDasharray="2 5" />
                       <XAxis dataKey="label" axisLine={false} tickLine={false} minTickGap={24} tick={{ fill: "var(--dim)", fontSize: 9 }} />
                       <YAxis axisLine={false} tickLine={false} tickFormatter={(value) => compactValue(Number(value), seriesKind)} tick={{ fill: "var(--dim)", fontSize: 9 }} />
@@ -261,6 +277,9 @@ export function ProviderDetails({
                     </BarChart>
                   </ResponsiveContainer>
                 ) : <div className="daily-chart__empty">Sem volume diário disponível</div>}
+                {chartData.length > 0 && (
+                  <p className="sr-only">{dailyAccessibilitySummary(chartData, seriesKind)}</p>
+                )}
               </div>
             </section>
           </section>
@@ -464,9 +483,22 @@ function formatSeriesValue(value: number, kind: SeriesKind) {
   return "Indisponível";
 }
 
+function historyAccessibilitySummary(points: ChartPoint[], kind: SeriesKind) {
+  const first = points[0];
+  const latest = points.at(-1);
+  const peak = points.reduce((current, point) => point.value > current.value ? point : current, first);
+  return `${points.length} pontos entre ${first.label} e ${latest?.label}. Valor atual: ${formatSeriesValue(latest?.value ?? 0, kind)}. Maior valor: ${formatSeriesValue(peak.value, kind)} em ${peak.label}.`;
+}
+
+function dailyAccessibilitySummary(points: ChartPoint[], kind: SeriesKind) {
+  const peak = points.reduce((current, point) => point.dailyValue > current.dailyValue ? point : current, points[0]);
+  return `Comparação diária com ${points.length} pontos. Maior volume: ${formatSeriesValue(peak.dailyValue, kind)} em ${peak.label}.`;
+}
+
 function formatCurrency(value: number) {
+  const normalized = Math.abs(value) < 0.005 ? 0 : value;
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD" })
-    .format(value)
+    .format(normalized)
     .replace("US$", "US$ ");
 }
 
@@ -481,7 +513,7 @@ function formatShortDate(value: string) {
 function sourceLabel(source?: ProviderUsage["source"]) {
   if (!source) return undefined;
   return ({
-    "codex-app-server": "Codex local",
+    "codex-app-server": "Codex App Server",
     openusage: "OpenUsage",
     local: "Histórico local",
     "claude-oauth": "Claude OAuth + local",
@@ -500,6 +532,7 @@ function statusLabel(status: ProviderUsage["status"]) {
 }
 
 function limitUnavailableCopy(providerId: ProviderId) {
+  if (providerId === "codex") return "Faça login no Codex com sua conta ChatGPT e atualize novamente para consultar as cotas oficiais.";
   if (providerId === "claude") return "Faça login no Claude Code e atualize novamente para consultar as cotas da assinatura.";
   if (providerId === "deepseek") return "A API informa o saldo. Um limite aparece aqui quando você define um orçamento mensal.";
   if (providerId === "openai") return "Defina um orçamento mensal para comparar o gasto real com o seu limite.";
@@ -511,10 +544,19 @@ function limitUnavailableTitle(providerId: ProviderId) {
 }
 
 function dataExplanation(providerId: ProviderId, source?: ProviderHistory["source"]) {
+  if (providerId === "codex") {
+    return "As cotas vêm diretamente de account/rateLimits/read no Codex App Server autenticado pela sua conta ChatGPT. O percentual exibido é o uso consumido, não o saldo restante.";
+  }
   if (providerId === "claude" && source === "provider-local") {
     return "Os totais são somados a partir dos arquivos JSONL locais do Claude Code. Nenhum conteúdo das conversas é armazenado pelo monitor.";
   }
   return "O monitor salva apenas tokens, custo e percentual em snapshots locais. Períodos sem o aplicativo ativo podem ficar sem pontos.";
+}
+
+function providerTypeLabel(usage: ProviderUsage) {
+  if (usage.providerId === "codex") return "Assinatura ChatGPT";
+  if (usage.providerId === "claude") return "Assinatura Claude";
+  return "API por consumo";
 }
 
 function ChartSkeleton() {
