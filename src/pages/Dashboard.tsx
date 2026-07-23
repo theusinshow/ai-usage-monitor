@@ -37,10 +37,10 @@ export function Dashboard({ usage, refreshing, lastUpdated, demoMode, onRefresh,
   }
 
   return <main className="app-shell">
-    <header className="topbar">
-      <div className="wordmark">
-        <span className="wordmark-mark" aria-hidden="true"><i /><i /><i /></span>
-        <div><h1>AI Usage</h1><span>Monitor</span></div>
+    <header className="topbar dashboard-topbar">
+      <div className="dashboard-title">
+        <span>AI Usage Monitor</span>
+        <h1>Visão geral</h1>
       </div>
       <nav aria-label="Ações">
         {onLab && <button className="icon-button icon-button--lab" type="button" onClick={onLab} aria-label="Abrir Design Lab" title="Abrir Design Lab"><FlaskConical size={16} /></button>}
@@ -58,9 +58,11 @@ export function Dashboard({ usage, refreshing, lastUpdated, demoMode, onRefresh,
       <span><strong>{attention.headline}</strong><small>{attention.detail}</small></span>
       <ChevronRight size={14} aria-hidden="true" />
     </button>}
-    <div className="provider-list">
-      {order.map(({ id, name }) => usage[id] ? <ProviderCard key={id} usage={usage[id]} expanded={expandedProvider === id} onToggle={() => setExpandedProvider((current) => current === id ? null : id)} onRetry={onRefresh} onConfigure={onSettings} /> : <ProviderSkeleton key={id} name={name} />)}
-    </div>
+    <section className="providers-panel" aria-label="Uso por provider">
+      <div className="provider-list">
+        {order.map(({ id, name }) => usage[id] ? <ProviderCard key={id} usage={usage[id]} expanded={expandedProvider === id} onToggle={() => setExpandedProvider((current) => current === id ? null : id)} onRetry={onRefresh} onConfigure={onSettings} /> : <ProviderSkeleton key={id} name={name} />)}
+      </div>
+    </section>
   </main>;
 }
 

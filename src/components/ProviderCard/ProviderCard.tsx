@@ -9,6 +9,8 @@ import { ProviderTrend } from "../ProviderTrend/ProviderTrend";
 export function ProviderCard({ usage, expanded, onToggle, onRetry, onConfigure }: { usage: ProviderUsage; expanded: boolean; onToggle: () => void; onRetry: () => void; onConfigure: () => void }) {
   const empty = usage.limits.length === 0 && usage.metrics.length === 0;
   const detailsId = `provider-details-${usage.providerId}`;
+  const hasMultipleLimits = usage.limits.length > 1;
+  const hasMixedOverview = usage.limits.length > 0 && usage.metrics.length > 0;
   return (
     <section id={`provider-row-${usage.providerId}`} className={`provider ${expanded ? "provider--expanded" : ""}`} data-provider={usage.providerId} aria-labelledby={`provider-${usage.providerId}`}>
       <header className="provider__header">
@@ -27,8 +29,12 @@ export function ProviderCard({ usage, expanded, onToggle, onRetry, onConfigure }
           : <StatusBadge status={usage.status} />}
       </header>
 
-      <div className="provider__overview">
-        {usage.limits.map((limit, index) => <UsageProgress key={limit.id} limit={limit} variant={index === 0 ? "ring" : "segments"} />)}
+      <div className={`provider__overview ${hasMultipleLimits ? "provider__overview--multi" : ""} ${hasMixedOverview ? "provider__overview--mixed" : ""}`}>
+        {usage.limits.length > 0 && (
+          <div className={`usage-grid ${hasMultipleLimits ? "usage-grid--split" : ""}`}>
+            {usage.limits.map((limit, index) => <UsageProgress key={limit.id} limit={limit} variant={index === 0 ? "ring" : "segments"} />)}
+          </div>
+        )}
 
         {usage.metrics.length > 0 && (
           <dl className="metrics">
