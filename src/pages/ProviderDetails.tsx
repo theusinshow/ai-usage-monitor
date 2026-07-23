@@ -282,7 +282,7 @@ export function ProviderDetails({
                 </div>
               ) : (
                 <div className="limit-unavailable">
-                  <strong>O provider não publica limites</strong>
+                  <strong>{limitUnavailableTitle(usage.providerId)}</strong>
                   <p>{limitUnavailableCopy(usage.providerId)}</p>
                 </div>
               )}
@@ -484,6 +484,7 @@ function sourceLabel(source?: ProviderUsage["source"]) {
     "codex-app-server": "Codex local",
     openusage: "OpenUsage",
     local: "Histórico local",
+    "claude-oauth": "Claude OAuth + local",
     "official-api": "API oficial",
   })[source];
 }
@@ -499,10 +500,14 @@ function statusLabel(status: ProviderUsage["status"]) {
 }
 
 function limitUnavailableCopy(providerId: ProviderId) {
-  if (providerId === "claude") return "O Claude Code permite medir tokens locais, mas não expõe oficialmente as cotas da assinatura.";
+  if (providerId === "claude") return "Faça login no Claude Code e atualize novamente para consultar as cotas da assinatura.";
   if (providerId === "deepseek") return "A API informa o saldo. Um limite aparece aqui quando você define um orçamento mensal.";
   if (providerId === "openai") return "Defina um orçamento mensal para comparar o gasto real com o seu limite.";
   return "Nenhuma janela de limite foi retornada nesta atualização.";
+}
+
+function limitUnavailableTitle(providerId: ProviderId) {
+  return providerId === "claude" ? "Limites ainda não disponíveis" : "O provider não publica limites";
 }
 
 function dataExplanation(providerId: ProviderId, source?: ProviderHistory["source"]) {

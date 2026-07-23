@@ -574,10 +574,19 @@ fn claude_usage() -> ProviderUsage {
             format_compact(tokens_month),
         ));
     }
+    let (limits, limit_error) = match claude_oauth_limits() {
+        Ok(limits) => (limits, None),
+        Err(error) => (vec![], Some(error)),
+    };
     let error = if metrics.is_empty() {
-        Some("Claude Code detectado. Ainda não há uso local legível; limites de assinatura não são expostos oficialmente pelo CLI.".into())
+        Some("Claude Code detectado. Ainda não há uso local legível.".into())
     } else {
-        None
+        limit_error
+    };
+    let source = if limits.is_empty() {
+        "local"
+    } else {
+        "claude-oauth"
     };
     ProviderUsage {
         provider_id: "claude".into(),
@@ -587,12 +596,83 @@ fn claude_usage() -> ProviderUsage {
         connected: true,
         plan: None,
         model: latest_model,
-        limits: vec![],
+        limits,
         metrics,
         last_updated: Utc::now().to_rfc3339(),
-        source: Some("local".into()),
+        source: Some(source.into()),
         error,
     }
+}
+
+fn claude_oauth_limits() -> Result<Vec<UsageLimit>, String> {
+    let credentials_path = dirs::home_dir()
+        .ok_or("Pasta de usuário não encontrada.")?
+        .join(".claude")
+        .join(".credentials.json");
+    let file = File::open(credentials_path)
+        .map_err(|_| "Limites do Claude indisponíveis: faça login no Claude Code.".to_string())?;
+    let credentials: Value = serde_json::from_reader(file)
+        .map_err(|_| "Credencial do Claude Code inválida.".to_string())?;
+    let access_token = credentials
+        .pointer("/claudeAiOauth/accessToken")
+        .and_then(Value::as_str)
+        .ok_or("Token OAuth do Claude Code não encontrado.")?;
+
+    let response = http_client()?
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .bearer_auth(access_token)
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("accept", "application/json")
+        .send()
+        .map_err(|error| {
+            format!(
+                "Falha ao consultar limites do Claude: {}",
+                safe_error(&error.to_string())
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Claude não retornou os limites da assinatura (status {}).",
+            response.status().as_u16()
+        ));
+    }
+    let payload: Value = response
+        .json()
+        .map_err(|_| "Resposta de limites do Claude inválida.".to_string())?;
+    let mut limits = Vec::new();
+    for (id, name, key) in [
+        ("fiveHour", "Sessão · 5 horas", "five_hour"),
+        ("sevenDay", "Semanal · 7 dias", "seven_day"),
+        ("sevenDayOpus", "Semanal · Opus", "seven_day_opus"),
+        ("sevenDaySonnet", "Semanal · Sonnet", "seven_day_sonnet"),
+    ] {
+        if let Some(limit) = claude_oauth_limit(&payload, id, name, key) {
+            limits.push(limit);
+        }
+    }
+    if limits.is_empty() {
+        return Err("A conta Claude não informou limites de assinatura.".into());
+    }
+    Ok(limits)
+}
+
+fn claude_oauth_limit(payload: &Value, id: &str, name: &str, key: &str) -> Option<UsageLimit> {
+    let value = payload.get(key)?;
+    let percentage = value.get("utilization").and_then(Value::as_f64)?;
+    let remaining = (100.0 - percentage).clamp(0.0, 100.0);
+    Some(UsageLimit {
+        id: id.into(),
+        name: name.into(),
+        used: Some(percentage),
+        remaining: Some(remaining),
+        limit: Some(100.0),
+        percentage_used: Some(percentage),
+        reset_at: value
+            .get("resets_at")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        detail: Some(format!("{remaining:.0}% disponível")),
+    })
 }
 
 fn claude_history(days: i64) -> Result<Vec<ProviderHistoryPoint>, String> {
@@ -685,7 +765,7 @@ fn api_usage(provider: &str, budget: Option<f64>) -> ProviderUsage {
 fn http_client() -> Result<Client, String> {
     Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent("AI-Usage-Monitor/0.1")
+        .user_agent("AI-Usage-Monitor/0.3")
         .build()
         .map_err(|error| error.to_string())
 }

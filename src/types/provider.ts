@@ -54,7 +54,7 @@ export interface ProviderUsage {
   limits: UsageLimit[];
   metrics: UsageMetric[];
   lastUpdated: string;
-  source?: "codex-app-server" | "openusage" | "local" | "official-api";
+  source?: "codex-app-server" | "openusage" | "local" | "claude-oauth" | "official-api";
   error?: string;
   trendLabel?: string;
   trend?: UsageTrendPoint[];

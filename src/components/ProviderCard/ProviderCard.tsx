@@ -79,6 +79,7 @@ function sourceLabel(source: NonNullable<ProviderUsage["source"]>) {
     "codex-app-server": "Codex local",
     openusage: "OpenUsage",
     local: "Histórico local",
+    "claude-oauth": "Claude OAuth + local",
     "official-api": "API oficial",
   })[source];
 }
